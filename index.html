@@ -252,7 +252,9 @@
         } else if (code === "already_subscribed") {
           setState("success", "Tu es déjà abonné à ce When.");
         } else {
-          setState("error", escapeHtml(errMessage(code)));
+  // Affiche le détail réel de l'erreur pour le diagnostic.
+  setState("error", escapeHtml(errMessage(code)) + '<br><br><span style="font-size:11px;opacity:.7">Détail : ' + escapeHtml(code) + '</span>');
+};
         }
         btn.disabled = false;
       });
