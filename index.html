@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+      <!DOCTYPE html>
 <html lang="fr">
 <head>
 <meta charset="utf-8">
@@ -16,7 +16,6 @@
     font-family:'Inter',system-ui,-apple-system,sans-serif;
     min-height:100vh; letter-spacing:-.011em;
   }
-  /* Aurora — même rendu que l'app (mesh violet/bleu atténué, CSS pur). */
   body::before {
     content:""; position:fixed; inset:-25%; z-index:-1; pointer-events:none;
     background:
@@ -63,7 +62,6 @@
   .btn:disabled { opacity:.6; cursor:default; }
   .hint { margin-top:16px; text-align:center; color:var(--muted); font-size:12px; }
 
-  /* États (chargement / succès / erreur) */
   .state { margin-top:24px; border-radius:16px; padding:16px; font-size:14px; text-align:center; }
   .state.loading { background:rgba(148,163,184,.08); color:var(--muted); }
   .state.success { background:rgba(52,211,153,.10); color:var(--success); border:1px solid rgba(52,211,153,.2); }
@@ -104,18 +102,13 @@
 (function () {
   "use strict";
 
-  // ── Configuration ──────────────────────────────────────────────
-  // Domaine de l'app When (fonctions backend). Remplace par ton domaine
-  // personnalisé si tu en as connecté un (il proxy /functions/ de la même façon).
   var API_BASE = "https://when-the-moment.base44.app/functions";
 
-  // ── Éléments DOM ───────────────────────────────────────────────
   var titleEl = document.getElementById("when-title");
   var labelEl = document.getElementById("when-label");
   var btn = document.getElementById("enable-btn");
   var stateEl = document.getElementById("state");
 
-  // ── Lecture du token dans l'URL (?token=...) ───────────────────
   var token = new URLSearchParams(window.location.search).get("token");
 
   function setState(kind, html) {
@@ -129,9 +122,11 @@
     return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
   }
 
-  // ── Appels cross-origin vers les fonctions backend ─────────────
   function callFn(name, body) {
-    return fetch(API_BASE + "/" + name, {
+    var timeout = new Promise(function (_, reject) {
+      setTimeout(function () { reject(new Error("timeout")); }, 12000);
+    });
+    var req = fetch(API_BASE + "/" + name, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body || {})
@@ -139,9 +134,9 @@
       return r.json().catch(function () { return { error: "bad_response" }; })
         .then(function (data) { return { status: r.status, data: data }; });
     });
+    return Promise.race([req, timeout]);
   }
 
-  // ── Conversion clé VAPID base64url → Uint8Array ────────────────
   function urlBase64ToUint8Array(base64String) {
     var padding = "=".repeat((4 - base64String.length % 4) % 4);
     var b64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -151,7 +146,6 @@
     return out;
   }
 
-  // ── Messages d'erreur lisibles ─────────────────────────────────
   function errMessage(code) {
     switch (code) {
       case "not_found": return "Lien invalide ou expiré. Vérifie le lien que tu as reçu.";
@@ -159,25 +153,24 @@
       case "subscriber_cap_reached": return "Ce When a atteint son nombre maximum d'abonnés.";
       case "missing_token": return "Aucun token de partage dans le lien.";
       case "missing_fields": return "Informations de souscription manquantes.";
+      case "timeout": return "Le service met trop de temps à répondre. Vérifie ta connexion et réessaie.";
+      case "bad_response": return "Réponse illisible du service. Réessaie plus tard.";
       default: return "Une erreur est survenue. Réessaie plus tard.";
     }
   }
 
-  // ── 1. Vérifier le support navigateur ──────────────────────────
   if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
     titleEl.textContent = "Notifications non supportées";
     setState("error", "Ton navigateur ne supporte pas les notifications web push. Essaie depuis Chrome, Edge ou Firefox sur mobile ou ordinateur.");
     return;
   }
 
-  // ── 2. Token présent ? ─────────────────────────────────────────
   if (!token) {
     titleEl.textContent = "Lien invalide";
     setState("error", escapeHtml(errMessage("missing_token")));
     return;
   }
 
-  // ── 3. Charger les infos du When + la config push ─────────────
   var vapidKey = null;
   Promise.all([
     callFn("getSharedReminder", { share_token: token }),
@@ -185,7 +178,6 @@
   ]).then(function (results) {
     var rem = results[0], cfg = results[1];
 
-    // When
     if (rem.status !== 200 || !rem.data || !rem.data.ok) {
       titleEl.textContent = "When introuvable";
       setState("error", escapeHtml(errMessage(rem.data ? rem.data.error : "not_found")));
@@ -197,23 +189,22 @@
       labelEl.classList.remove("hidden");
     }
 
-    // Config push
     if (cfg.status !== 200 || !cfg.data || !cfg.data.vapid_public_key) {
       setState("error", "Les notifications push ne sont pas activées sur ce service pour le moment.");
       return;
     }
     vapidKey = cfg.data.vapid_public_key;
     btn.disabled = false;
-  }).catch(function () {
+  }).catch(function (err) {
+    var code = (err && err.message) ? err.message : "unknown";
     titleEl.textContent = "Erreur de chargement";
-    setState("error", "Impossible de contacter le service. Vérifie ta connexion et réessaie.");
+    setState("error", escapeHtml(errMessage(code)) + '<br><br><span style="font-size:11px;opacity:.7">Détail : ' + escapeHtml(code) + '</span>');
   });
 
-  // ── 4. Activation des notifications ───────────────────────────
   btn.addEventListener("click", function () {
     if (!vapidKey) return;
     btn.disabled = true;
-    setState("loading", '<span class="spinner"></span>Aktivation en cours…');
+    setState("loading", '<span class="spinner"></span>Activation en cours…');
 
     Notification.requestPermission().then(function (perm) {
       if (perm !== "granted") {
@@ -221,7 +212,6 @@
         btn.disabled = false;
         return;
       }
-      // Enregistre le service worker (chemin relatif → fonctionne sous /repo/ GitHub Pages)
       navigator.serviceWorker.register("sw.js").then(function (reg) {
         return reg.pushManager.subscribe({
           userVisibleOnly: true,
@@ -236,7 +226,6 @@
         };
         return callFn("joinSharedReminder", payload).then(function (res) {
           if (res.status === 200 && res.data && (res.data.ok || res.data.already_subscribed)) {
-            // Succès : remplace le bouton par une confirmation visuelle.
             btn.style.display = "none";
             setState("success",
               '<svg class="ok-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' +
@@ -252,9 +241,7 @@
         } else if (code === "already_subscribed") {
           setState("success", "Tu es déjà abonné à ce When.");
         } else {
-  // Affiche le détail réel de l'erreur pour le diagnostic.
-  setState("error", escapeHtml(errMessage(code)) + '<br><br><span style="font-size:11px;opacity:.7">Détail : ' + escapeHtml(code) + '</span>');
-};
+          setState("error", escapeHtml(errMessage(code)) + '<br><br><span style="font-size:11px;opacity:.7">Détail : ' + escapeHtml(code) + '</span>');
         }
         btn.disabled = false;
       });
